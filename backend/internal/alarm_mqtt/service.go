@@ -12,6 +12,7 @@ import (
 
 	"tashan-weir-seepage/internal/database"
 	"tashan-weir-seepage/internal/message"
+	"tashan-weir-seepage/internal/metrics"
 	"tashan-weir-seepage/internal/models"
 )
 
@@ -158,6 +159,8 @@ func (a *AlarmMQTT) evaluateAndPush(sd models.SensorData) {
 		return
 	}
 
+	metrics.IncAlarmTriggered(alarm.AlarmLevel)
+
 	mqttTopic := fmt.Sprintf("%s/%s", a.alarmTopic, alarm.AlarmLevel)
 	alarm.MQTTTopic = &mqttTopic
 
@@ -217,8 +220,10 @@ func (a *AlarmMQTT) publishAlarm(alarm *models.AlarmRecord, cfg *models.SensorCo
 	if token.Error() != nil {
 		return token.Error()
 	}
+	metrics.IncMQTTMessagesPublished()
 
 	a.mqttClient.Publish(fmt.Sprintf("%s/all", a.alarmTopic), 2, false, data)
+	metrics.IncMQTTMessagesPublished()
 	log.Printf("[alarm_mqtt] alarm pushed id=%d level=%s type=%s", alarm.ID, alarm.AlarmLevel, alarm.AlarmType)
 	return nil
 }
@@ -236,6 +241,7 @@ func (a *AlarmMQTT) PublishSensorData(ctx context.Context, dtuID string, data []
 	body := jsonMarshal(payload)
 	topic := fmt.Sprintf("%s/sensor/%s", a.dataTopic, dtuID)
 	a.mqttClient.Publish(topic, 0, false, body)
+	metrics.IncMQTTMessagesPublished()
 }
 
 func (a *AlarmMQTT) pushRetry(alarm *models.AlarmRecord, cfg *models.SensorConfig) {

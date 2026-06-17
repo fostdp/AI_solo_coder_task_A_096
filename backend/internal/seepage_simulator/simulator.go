@@ -10,6 +10,7 @@ import (
 
 	"tashan-weir-seepage/internal/database"
 	"tashan-weir-seepage/internal/message"
+	"tashan-weir-seepage/internal/metrics"
 	"tashan-weir-seepage/internal/simulation"
 )
 
@@ -108,6 +109,7 @@ func (s *SeepageSimulator) Run(req message.SimRequestMsg) *message.SimResultMsg 
 	defer s.mu.Unlock()
 
 	start := time.Now()
+	metrics.IncSeepageSimulationRequests()
 	upWL := req.UpstreamWL
 	if upWL <= 0 {
 		upWL = s.cfg.Hydrology.DefaultUpstreamWL
@@ -140,7 +142,9 @@ func (s *SeepageSimulator) Run(req message.SimRequestMsg) *message.SimResultMsg 
 	}
 
 	sim, grids, err := solver.Run(upWL, downWL, req.RequestID)
-	elapsed := time.Since(start).Milliseconds()
+	elapsed := time.Since(start)
+	metrics.ObserveSeepageSimulationDuration(elapsed)
+	elapsedMs := elapsed.Milliseconds()
 
 	if err != nil {
 		return &message.SimResultMsg{
@@ -150,7 +154,7 @@ func (s *SeepageSimulator) Run(req message.SimRequestMsg) *message.SimResultMsg 
 		}
 	}
 
-	sim.CalculationTimeMs = elapsed
+	sim.CalculationTimeMs = elapsedMs
 	sim.Parameters["solver"] = "FDM+InterfaceElement"
 	sim.Parameters["grid_nx"] = s.cfg.Seepage.GridNX
 	sim.Parameters["grid_ny"] = s.cfg.Seepage.GridNY

@@ -10,6 +10,7 @@ import (
 
 	"tashan-weir-seepage/internal/database"
 	"tashan-weir-seepage/internal/message"
+	"tashan-weir-seepage/internal/metrics"
 	"tashan-weir-seepage/internal/models"
 	"tashan-weir-seepage/internal/optimization"
 )
@@ -117,6 +118,7 @@ func (o *AntiSeepageOptimizer) Run(req message.OptRequestMsg) *message.OptResult
 	defer o.mu.Unlock()
 
 	start := time.Now()
+	metrics.IncOptimizationRequests()
 
 	gaParams := optimization.GAParams{
 		PopSize:          o.cfg.PopulationSize,
@@ -144,18 +146,20 @@ func (o *AntiSeepageOptimizer) Run(req message.OptRequestMsg) *message.OptResult
 		req.DownstreamWL,
 		req.RequestID,
 	)
-	elapsed := time.Since(start).Milliseconds()
+	elapsed := time.Since(start)
+	metrics.ObserveOptimizationDuration(elapsed)
+	elapsedMs := elapsed.Milliseconds()
 
 	if err != nil {
 		return &message.OptResultMsg{
 			RequestID: req.RequestID,
 			Success:   false,
 			Error:     err.Error(),
-			ElapsedMs: elapsed,
+			ElapsedMs: elapsedMs,
 		}
 	}
 
-	result.OptimizationTimeMs = elapsed
+	result.OptimizationTimeMs = elapsedMs
 
 	if o.store != nil {
 		ctxDB, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -183,6 +187,6 @@ func (o *AntiSeepageOptimizer) Run(req message.OptRequestMsg) *message.OptResult
 		Success:     true,
 		Result:      result,
 		ParetoFront: paretoModels,
-		ElapsedMs:   elapsed,
+		ElapsedMs:   elapsedMs,
 	}
 }

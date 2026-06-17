@@ -1,0 +1,38 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+  external_labels:
+    cluster: 'tashan-weir'
+    environment: 'production'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files: []
+
+scrape_configs:
+  - job_name: 'tashan-weir-backend'
+    metrics_path: '/metrics'
+    scheme: 'http'
+    static_configs:
+      - targets: ['backend:8080']
+        labels:
+          service: 'tashan-weir-backend'
+          module: 'api'
+
+  - job_name: 'tashan-weir-simulator'
+    metrics_path: '/metrics'
+    scheme: 'http'
+    static_configs:
+      - targets: ['sensor-simulator:8081']
+        labels:
+          service: 'tashan-weir-simulator'
+          module: 'simulator'
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

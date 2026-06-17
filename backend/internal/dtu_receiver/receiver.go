@@ -10,6 +10,7 @@ import (
 
 	"tashan-weir-seepage/internal/database"
 	"tashan-weir-seepage/internal/message"
+	"tashan-weir-seepage/internal/metrics"
 	"tashan-weir-seepage/internal/models"
 )
 
@@ -102,6 +103,10 @@ func (r *DTUReceiver) HandleAndStore(ctx context.Context, payload *models.DTUPay
 	}
 	if err := r.store.InsertSensorDataBatch(ctx, payload.Sensors); err != nil {
 		return 0, err
+	}
+
+	for range payload.Sensors {
+		metrics.IncSensorDataReceived()
 	}
 
 	for i := range payload.Sensors {

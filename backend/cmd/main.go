@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -21,6 +22,18 @@ func main() {
 	log.Println()
 
 	port := getEnv("PORT", "8080")
+	pprofEnabled := getEnv("PPROF_ENABLED", "true") == "true"
+	pprofPort := getEnv("PPROF_PORT", "6060")
+
+	if pprofEnabled {
+		go func() {
+			log.Printf("[INIT] Starting pprof server on :%s", pprofPort)
+			pprofAddr := ":" + pprofPort
+			if err := http.ListenAndServe(pprofAddr, nil); err != nil {
+				log.Printf("[WARN] pprof server failed: %v", err)
+			}
+		}()
+	}
 
 	log.Println("[INIT] Connecting to TimescaleDB...")
 	db, err := database.NewDatabase()
@@ -51,6 +64,11 @@ func main() {
 		log.Printf("[SERVER] Frontend available at http://localhost:%s/", port)
 		log.Printf("[SERVER] API health at http://localhost:%s/api/v1/health", port)
 		log.Printf("[SERVER] API configs at http://localhost:%s/api/v1/configs", port)
+		log.Printf("[SERVER] Prometheus metrics at http://localhost:%s/metrics", port)
+		log.Printf("[SERVER] pprof debug at http://localhost:%s/debug/pprof/", port)
+		if pprofEnabled {
+			log.Printf("[SERVER] Standalone pprof at http://localhost:%s/debug/pprof/", pprofPort)
+		}
 		log.Println()
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

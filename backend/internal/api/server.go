@@ -6,18 +6,23 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/pprof"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"tashan-weir-seepage/internal/alarm_mqtt"
 	"tashan-weir-seepage/internal/anti_seepage_optimizer"
 	"tashan-weir-seepage/internal/database"
 	"tashan-weir-seepage/internal/dtu_receiver"
 	"tashan-weir-seepage/internal/message"
+	"tashan-weir-seepage/internal/metrics"
 	"tashan-weir-seepage/internal/models"
 	"tashan-weir-seepage/internal/seepage_simulator"
 )
@@ -28,18 +33,19 @@ const (
 )
 
 type Server struct {
-	router       *gin.Engine
-	store        *database.DataStore
-	bus          *message.Bus
-	alarmSvc     *alarm_mqtt.AlarmMQTT
-	dtu          *dtu_receiver.DTUReceiver
-	simulator    *seepage_simulator.SeepageSimulator
-	optimizer    *anti_seepage_optimizer.AntiSeepageOptimizer
-	hydraCfg     seepage_simulator.HydraulicsConfig
-	genCfg       anti_seepage_optimizer.GeneticConfig
-	wg           sync.WaitGroup
-	ctx          context.Context
-	cancel       context.CancelFunc
+	router            *gin.Engine
+	store             *database.DataStore
+	bus               *message.Bus
+	alarmSvc          *alarm_mqtt.AlarmMQTT
+	dtu               *dtu_receiver.DTUReceiver
+	simulator         *seepage_simulator.SeepageSimulator
+	optimizer         *anti_seepage_optimizer.AntiSeepageOptimizer
+	hydraCfg          seepage_simulator.HydraulicsConfig
+	genCfg            anti_seepage_optimizer.GeneticConfig
+	metricsCollector  *metrics.Collector
+	wg                sync.WaitGroup
+	ctx               context.Context
+	cancel            context.CancelFunc
 }
 
 func NewServer(store *database.DataStore) *Server {
@@ -63,20 +69,22 @@ func NewServer(store *database.DataStore) *Server {
 	}
 
 	s := &Server{
-		router:    gin.Default(),
-		store:     store,
-		bus:       bus,
-		alarmSvc:  alarmSvc,
-		dtu:       dtu_receiver.New(store, bus),
-		simulator: seepage_simulator.New(hydraCfg, store, bus),
-		optimizer: anti_seepage_optimizer.New(genCfg, resolvePath(hydraulicsCfgDefault), store, bus),
-		hydraCfg:  hydraCfg,
-		genCfg:    genCfg,
-		ctx:       ctx,
-		cancel:    cancel,
+		router:           gin.Default(),
+		store:            store,
+		bus:              bus,
+		alarmSvc:         alarmSvc,
+		dtu:              dtu_receiver.New(store, bus),
+		simulator:        seepage_simulator.New(hydraCfg, store, bus),
+		optimizer:        anti_seepage_optimizer.New(genCfg, resolvePath(hydraulicsCfgDefault), store, bus),
+		hydraCfg:         hydraCfg,
+		genCfg:           genCfg,
+		metricsCollector: metrics.NewCollector(),
+		ctx:              ctx,
+		cancel:           cancel,
 	}
 
 	s.setupCORS()
+	s.router.Use(metrics.PrometheusMiddleware())
 	s.setupRoutes()
 	s.loadSensorConfigs()
 	s.startModules()
@@ -84,14 +92,33 @@ func NewServer(store *database.DataStore) *Server {
 }
 
 func resolvePath(p string) string {
-	if _, err := os.Stat(p); err == nil {
-		return p
+	candidates := []string{
+		p,
+		"../" + p,
+		"/" + p,
+		filepath.Join("/app", p),
 	}
-	alt := "../" + p
-	if _, err := os.Stat(alt); err == nil {
-		return alt
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
 	}
 	return p
+}
+
+func resolveFrontendPath() string {
+	candidates := []string{
+		"./frontend",
+		"../frontend",
+		"/frontend",
+		"/app/frontend",
+	}
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return "./frontend"
 }
 
 func defaultHydraulics() seepage_simulator.HydraulicsConfig {
@@ -150,6 +177,7 @@ func (s *Server) startModules() {
 	s.alarmSvc.Start()
 	s.simulator.Start()
 	s.optimizer.Start()
+	s.metricsCollector.Start()
 	log.Println("[server] all modules started")
 }
 
@@ -160,6 +188,7 @@ func (s *Server) Stop() {
 	s.alarmSvc.Stop()
 	s.simulator.Stop()
 	s.optimizer.Stop()
+	s.metricsCollector.Stop()
 	log.Println("[server] stopped")
 }
 
@@ -174,9 +203,31 @@ func (s *Server) setupCORS() {
 		}
 		c.Next()
 	})
+	s.router.Use(gzip.Gzip(gzip.DefaultCompression))
 }
 
 func (s *Server) setupRoutes() {
+	promHandler := promhttp.Handler()
+	s.router.GET("/metrics", func(c *gin.Context) {
+		promHandler.ServeHTTP(c.Writer, c.Request)
+	})
+
+	pprofGroup := s.router.Group("/debug/pprof")
+	{
+		pprofGroup.GET("/", gin.WrapF(pprof.Index))
+		pprofGroup.GET("/cmdline", gin.WrapF(pprof.Cmdline))
+		pprofGroup.GET("/profile", gin.WrapF(pprof.Profile))
+		pprofGroup.POST("/symbol", gin.WrapF(pprof.Symbol))
+		pprofGroup.GET("/symbol", gin.WrapF(pprof.Symbol))
+		pprofGroup.GET("/trace", gin.WrapF(pprof.Trace))
+		pprofGroup.GET("/allocs", gin.WrapH(pprof.Handler("allocs")))
+		pprofGroup.GET("/block", gin.WrapH(pprof.Handler("block")))
+		pprofGroup.GET("/goroutine", gin.WrapH(pprof.Handler("goroutine")))
+		pprofGroup.GET("/heap", gin.WrapH(pprof.Handler("heap")))
+		pprofGroup.GET("/mutex", gin.WrapH(pprof.Handler("mutex")))
+		pprofGroup.GET("/threadcreate", gin.WrapH(pprof.Handler("threadcreate")))
+	}
+
 	api := s.router.Group("/api/v1")
 
 	api.GET("/health", s.handleHealth)
@@ -200,9 +251,10 @@ func (s *Server) setupRoutes() {
 	api.GET("/alarms", s.handleGetAlarms)
 	api.PUT("/alarms/:id/handle", s.handleAcknowledgeAlarm)
 
-	s.router.Static("/frontend", "./frontend")
+	frontendPath := resolveFrontendPath()
+	s.router.Static("/frontend", frontendPath)
 	s.router.GET("/", func(c *gin.Context) {
-		c.File("./frontend/index.html")
+		c.File(filepath.Join(frontendPath, "index.html"))
 	})
 }
 
