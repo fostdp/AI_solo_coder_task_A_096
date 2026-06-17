@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>古代它山堰坝体结构渗流仿真与防渗优化系统</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header class="header">
+        <div class="header-left">
+            <h1>🏯 古代它山堰坝体结构渗流仿真与防渗优化系统</h1>
+            <span class="subtitle">唐代水利遗产 · 数字监测平台</span>
+        </div>
+        <div class="header-right">
+            <div class="status-indicator">
+                <span class="status-dot" id="dbStatus"></span>
+                <span id="dbStatusText">数据库</span>
+            </div>
+            <div class="status-indicator">
+                <span class="status-dot" id="mqttStatus"></span>
+                <span id="mqttStatusText">MQTT</span>
+            </div>
+            <div class="time-display" id="currentTime"></div>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <aside class="sidebar">
+            <div class="panel">
+                <h3>📊 实时监测数据</h3>
+                <div class="data-grid" id="realTimeData">
+                    <div class="data-card loading">
+                        <span class="label">上游水位</span>
+                        <span class="value" id="wl001">-- m</span>
+                    </div>
+                    <div class="data-card loading">
+                        <span class="label">下游水位</span>
+                        <span class="value" id="wl002">-- m</span>
+                    </div>
+                    <div class="data-card loading">
+                        <span class="label">渗流量</span>
+                        <span class="value" id="sm001">-- L/s</span>
+                    </div>
+                    <div class="data-card loading">
+                        <span class="label">最大扬压力</span>
+                        <span class="value" id="maxPZ">-- kPa</span>
+                    </div>
+                    <div class="data-card loading">
+                        <span class="label">平均扬压力</span>
+                        <span class="value" id="avgPZ">-- kPa</span>
+                    </div>
+                    <div class="data-card loading">
+                        <span class="label">冲刷深度</span>
+                        <span class="value" id="sd001">-- m</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>🧪 渗流仿真控制</h3>
+                <div class="control-group">
+                    <label>上游水位 (m):</label>
+                    <input type="number" id="simUpstream" value="8.5" step="0.1" min="0">
+                </div>
+                <div class="control-group">
+                    <label>下游水位 (m):</label>
+                    <input type="number" id="simDownstream" value="3.2" step="0.1" min="0">
+                </div>
+                <div class="control-group">
+                    <label>渗透系数 (m/s):</label>
+                    <input type="number" id="simPermeability" value="1e-7" step="1e-8" min="1e-10">
+                </div>
+                <div class="control-group">
+                    <label>网格分辨率:</label>
+                    <select id="simResolution">
+                        <option value="low">低 (40×20)</option>
+                        <option value="medium" selected>中 (60×30)</option>
+                        <option value="high">高 (100×50)</option>
+                    </select>
+                </div>
+                <div class="control-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="enableBlanket"> 启用防渗铺盖
+                    </label>
+                </div>
+                <div class="control-group" id="blanketControls" style="display:none">
+                    <label>铺盖长度 (m):</label>
+                    <input type="number" id="blanketLength" value="15" step="0.5" min="2" max="50">
+                </div>
+                <div class="control-group" id="blanketThickControls" style="display:none">
+                    <label>铺盖厚度 (m):</label>
+                    <input type="number" id="blanketThickness" value="1.5" step="0.1" min="0.3" max="5">
+                </div>
+                <button class="btn btn-primary" id="runSimulation">
+                    ▶ 运行渗流仿真
+                </button>
+            </div>
+
+            <div class="panel">
+                <h3>🧬 防渗优化 (遗传算法)</h3>
+                <div class="control-group">
+                    <label>铺盖长度范围 (m):</label>
+                    <div class="range-inputs">
+                        <input type="number" id="optLenMin" value="2" min="0"> ~
+                        <input type="number" id="optLenMax" value="30" min="0">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>铺盖厚度范围 (m):</label>
+                    <div class="range-inputs">
+                        <input type="number" id="optThickMin" value="0.3" min="0"> ~
+                        <input type="number" id="optThickMax" value="3.0" min="0">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>种群大小:</label>
+                    <input type="number" id="optPopSize" value="50" min="10" max="200">
+                </div>
+                <div class="control-group">
+                    <label>最大迭代代数:</label>
+                    <input type="number" id="optMaxGen" value="100" min="10" max="500">
+                </div>
+                <button class="btn btn-success" id="runOptimization">
+                    🧬 启动优化算法
+                </button>
+                <div id="optimizationResult" class="result-box" style="display:none"></div>
+            </div>
+
+            <div class="panel">
+                <h3>🎨 可视化选项</h3>
+                <div class="control-group checkbox-group">
+                    <label><input type="checkbox" id="showStreamlines" checked> 显示流线粒子</label>
+                </div>
+                <div class="control-group checkbox-group">
+                    <label><input type="checkbox" id="showPressureCloud" checked> 显示扬压力云图</label>
+                </div>
+                <div class="control-group checkbox-group">
+                    <label><input type="checkbox" id="showWireframe"> 显示网格线框</label>
+                </div>
+                <div class="control-group checkbox-group">
+                    <label><input type="checkbox" id="showSensors" checked> 显示传感器位置</label>
+                </div>
+                <div class="control-group">
+                    <label>粒子数量:</label>
+                    <input type="range" id="particleCount" min="50" max="500" value="200">
+                </div>
+                <div class="control-group">
+                    <label>粒子速度:</label>
+                    <input type="range" id="particleSpeed" min="1" max="10" value="5">
+                </div>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="3dview">🌐 三维坝体剖面</button>
+                <button class="tab-btn" data-tab="simulations">📋 仿真历史</button>
+                <button class="tab-btn" data-tab="optimizations">📈 优化记录</button>
+                <button class="tab-btn" data-tab="sensors">📡 传感器列表</button>
+            </div>
+
+            <div class="tab-content active" id="tab-3dview">
+                <div class="viewer-container">
+                    <div id="threeCanvasContainer"></div>
+                    <canvas id="overlayCanvas"></canvas>
+                    <div class="viewer-legend">
+                        <h4>扬压力云图 (kPa)</h4>
+                        <div class="color-bar">
+                            <div class="color-gradient"></div>
+                            <div class="color-labels">
+                                <span id="legendMin">0</span>
+                                <span id="legendMid">40</span>
+                                <span id="legendMax">80</span>
+                            </div>
+                        </div>
+                        <h4>渗流场图例</h4>
+                        <div class="legend-items">
+                            <div class="legend-item">
+                                <span class="legend-color stream"></span>
+                                <span>渗流流线 (粒子)</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-sensor"></span>
+                                <span>传感器点位</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-water-up"></span>
+                                <span>上游水位</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-water-down"></span>
+                                <span>下游水位</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="viewer-stats" id="viewerStats">
+                        <div>等待仿真数据...</div>
+                    </div>
+                </div>
+                <div class="charts-row">
+                    <div class="chart-container">
+                        <h4>📈 渗流量时序 (近24小时)</h4>
+                        <canvas id="seepageChart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <h4>📉 扬压力分布 (各测点)</h4>
+                        <canvas id="pressureChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content" id="tab-simulations">
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>名称</th>
+                                <th>上游水位</th>
+                                <th>下游水位</th>
+                                <th>渗流量(L/s)</th>
+                                <th>最大扬压力(kPa)</th>
+                                <th>网格数</th>
+                                <th>耗时(ms)</th>
+                                <th>时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="simulationsTableBody">
+                            <tr><td colspan="10" class="text-center">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="tab-content" id="tab-optimizations">
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>名称</th>
+                                <th>最优铺盖长(m)</th>
+                                <th>最优铺盖厚(m)</th>
+                                <th>优化前(L/s)</th>
+                                <th>优化后(L/s)</th>
+                                <th>削减率(%)</th>
+                                <th>迭代代数</th>
+                                <th>耗时(ms)</th>
+                                <th>时间</th>
+                            </tr>
+                        </thead>
+                        <tbody id="optimizationsTableBody">
+                            <tr><td colspan="10" class="text-center">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="tab-content" id="tab-sensors">
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>传感器ID</th>
+                                <th>名称</th>
+                                <th>类型</th>
+                                <th>坐标(x,y)</th>
+                                <th>预警阈值</th>
+                                <th>危险阈值</th>
+                                <th>单位</th>
+                                <th>状态</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sensorsTableBody">
+                            <tr><td colspan="8" class="text-center">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div class="alarm-panel" id="alarmPanel">
+        <div class="alarm-header">
+            <h3>🚨 告警中心</h3>
+            <div class="alarm-count" id="activeAlarmCount">0</div>
+        </div>
+        <div class="alarm-list" id="alarmList">
+            <div class="empty-state">暂无告警</div>
+        </div>
+    </div>
+
+    <div class="modal" id="loadingModal" style="display:none">
+        <div class="modal-content">
+            <div class="spinner"></div>
+            <div id="loadingText">正在计算渗流场...</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="js/dam3d.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
