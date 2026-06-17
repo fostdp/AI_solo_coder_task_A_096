@@ -1,0 +1,29 @@
+{
+  "dam_geometry": {
+    "length": 113.7,
+    "height": 3.85,
+    "top_width": 4.8,
+    "upstream_slope": 0.35,
+    "downstream_slope": 0.6,
+    "foundation_depth": 5.0
+  },
+  "hydrology": {
+    "default_upstream_wl": 3.5,
+    "default_downstream_wl": 0.5,
+    "water_density": 1000.0,
+    "gravity": 9.81
+  },
+  "seepage": {
+    "base_permeability": 1.0e-7,
+    "foundation_permeability_ratio": 5.0,
+    "interface_enabled": true,
+    "interface_thickness_ratio": 2.0,
+    "interface_permeability_ratio": 0.5,
+    "blanket_permeability_ratio": 0.05,
+    "grid_nx": 200,
+    "grid_ny": 80,
+    "solver_tolerance": 1.0e-6,
+    "solver_max_iter": 5000,
+    "sor_omega": 1.5
+  }
+}

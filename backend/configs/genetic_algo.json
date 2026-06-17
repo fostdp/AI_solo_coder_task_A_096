@@ -1,0 +1,28 @@
+{
+  "algorithm": "NSGA-II",
+  "population_size": 60,
+  "generations": 80,
+  "decision_variables": {
+    "blanket_length": { "min": 1.0, "max": 20.0 },
+    "blanket_thickness": { "min": 0.2, "max": 3.0 }
+  },
+  "operators": {
+    "sbx_eta_c": 15.0,
+    "sbx_crossover_prob": 0.9,
+    "polynomial_eta_m": 20.0,
+    "mutation_prob": 0.1,
+    "mutation_perturbation": 0.1,
+    "tournament_size": 2
+  },
+  "cost_config": {
+    "concrete_unit_price": 350.0,
+    "clay_unit_price": 120.0,
+    "geomembrane_unit_price": 85.0,
+    "excavation_unit_price": 45.0,
+    "max_budget": 500000.0
+  },
+  "parallel": {
+    "enabled": true,
+    "max_workers": 4
+  }
+}

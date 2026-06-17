@@ -1,8 +1,11 @@
 package optimization
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
+	"os"
 	"time"
 
 	"tashan-weir-seepage/internal/models"
@@ -35,6 +38,7 @@ type ParetoSolution struct {
 	SeepageFlow      float64
 	MaterialCost     float64
 	FlowReduction    float64
+	Rank             int
 }
 
 type GeneticOptimizer struct {
@@ -54,7 +58,7 @@ type GeneticOptimizer struct {
 	ConvergenceCurve   []float64
 	CostConfig          CostConfig
 	ParetoFront         []ParetoSolution
-	rand                *utils.Rand
+	rand                *rand.Rand
 }
 
 func NewGeneticOptimizer(geo simulation.DamGeometry, basePermeability float64) *GeneticOptimizer {
@@ -81,6 +85,139 @@ func NewGeneticOptimizer(geo simulation.DamGeometry, basePermeability float64) *
 			ExcavationUnitPrice:  45.0,
 			MaxBudget:            500000.0,
 		},
+	}
+}
+
+type HydraulicsConfigLite struct {
+	DamGeometry simulation.DamGeometry `json:"dam_geometry"`
+	Seepage     struct {
+		BasePermeability           float64 `json:"base_permeability"`
+		FoundationPermeabilityRatio float64 `json:"foundation_permeability_ratio"`
+		InterfaceEnabled           bool    `json:"interface_enabled"`
+		InterfaceThicknessRatio    float64 `json:"interface_thickness_ratio"`
+		InterfacePermeabilityRatio float64 `json:"interface_permeability_ratio"`
+		BlanketPermeabilityRatio   float64 `json:"blanket_permeability_ratio"`
+		GridNX                     int     `json:"grid_nx"`
+		GridNY                     int     `json:"grid_ny"`
+	} `json:"seepage"`
+}
+
+type GAParams struct {
+	PopSize, MaxGen             int
+	MutationRate, CrossoverRate float64
+	TournamentSize              int
+	MinLen, MaxLen              float64
+	MinThick, MaxThick          float64
+	BlanketPermRatio            float64
+	Cost                        CostConfig
+}
+
+func NewGeneticOptimizerFromConfig(hydraulicsCfgPath string, gaCfg interface{}) *GeneticOptimizer {
+	var hydCfg HydraulicsConfigLite
+	if hydraulicsCfgPath != "" {
+		if data, err := os.ReadFile(hydraulicsCfgPath); err == nil {
+			_ = json.Unmarshal(data, &hydCfg)
+		}
+	}
+	if hydCfg.Seepage.BasePermeability <= 0 {
+		hydCfg.Seepage.BasePermeability = 1e-7
+	}
+	if hydCfg.Seepage.GridNX <= 0 {
+		hydCfg.Seepage.GridNX = 60
+	}
+	if hydCfg.Seepage.GridNY <= 0 {
+		hydCfg.Seepage.GridNY = 30
+	}
+	if hydCfg.Seepage.FoundationPermeabilityRatio <= 0 {
+		hydCfg.Seepage.FoundationPermeabilityRatio = 5.0
+	}
+
+	solver := simulation.NewSeepageSolverWithConfig(
+		hydCfg.DamGeometry,
+		hydCfg.Seepage.BasePermeability,
+		hydCfg.Seepage.GridNX,
+		hydCfg.Seepage.GridNY,
+		hydCfg.Seepage.FoundationPermeabilityRatio,
+		hydCfg.Seepage.InterfaceEnabled,
+		hydCfg.Seepage.InterfaceThicknessRatio,
+		hydCfg.Seepage.InterfacePermeabilityRatio,
+	)
+
+	blanketRatio := hydCfg.Seepage.BlanketPermeabilityRatio
+	if blanketRatio <= 0 {
+		blanketRatio = 0.01
+	}
+
+	defaultGA := GAParams{
+		PopSize:           60,
+		MaxGen:            80,
+		MutationRate:      0.1,
+		CrossoverRate:     0.9,
+		TournamentSize:    2,
+		MinLen:            1.0,
+		MaxLen:            20.0,
+		MinThick:          0.2,
+		MaxThick:          3.0,
+		BlanketPermRatio:  blanketRatio,
+		Cost: CostConfig{
+			ConcreteUnitPrice:    350,
+			ClayUnitPrice:        120,
+			GeomembraneUnitPrice: 85,
+			ExcavationUnitPrice:  45,
+			MaxBudget:            500000,
+		},
+	}
+
+	if cfg, ok := gaCfg.(GAParams); ok {
+		if cfg.PopSize > 0 {
+			defaultGA.PopSize = cfg.PopSize
+		}
+		if cfg.MaxGen > 0 {
+			defaultGA.MaxGen = cfg.MaxGen
+		}
+		if cfg.MutationRate > 0 {
+			defaultGA.MutationRate = cfg.MutationRate
+		}
+		if cfg.CrossoverRate > 0 {
+			defaultGA.CrossoverRate = cfg.CrossoverRate
+		}
+		if cfg.TournamentSize > 0 {
+			defaultGA.TournamentSize = cfg.TournamentSize
+		}
+		if cfg.MinLen > 0 {
+			defaultGA.MinLen = cfg.MinLen
+		}
+		if cfg.MaxLen > cfg.MinLen {
+			defaultGA.MaxLen = cfg.MaxLen
+		}
+		if cfg.MinThick > 0 {
+			defaultGA.MinThick = cfg.MinThick
+		}
+		if cfg.MaxThick > cfg.MinThick {
+			defaultGA.MaxThick = cfg.MaxThick
+		}
+		if cfg.BlanketPermRatio > 0 {
+			defaultGA.BlanketPermRatio = cfg.BlanketPermRatio
+		}
+		if cfg.Cost.ConcreteUnitPrice > 0 {
+			defaultGA.Cost = cfg.Cost
+		}
+	}
+
+	return &GeneticOptimizer{
+		PopulationSize:      defaultGA.PopSize,
+		MaxGenerations:      defaultGA.MaxGen,
+		MutationRate:        defaultGA.MutationRate,
+		CrossoverRate:       defaultGA.CrossoverRate,
+		TournamentSize:      defaultGA.TournamentSize,
+		MinBlanketLength:    defaultGA.MinLen,
+		MaxBlanketLength:    defaultGA.MaxLen,
+		MinBlanketThickness: defaultGA.MinThick,
+		MaxBlanketThickness: defaultGA.MaxThick,
+		BlanketPermeability: hydCfg.Seepage.BasePermeability * defaultGA.BlanketPermRatio,
+		BaseSolver:          solver,
+		rand:                utils.NewRand(),
+		CostConfig:          defaultGA.Cost,
 	}
 }
 
@@ -652,6 +789,29 @@ func (ga *GeneticOptimizer) Optimize(req models.OptimizationRequest) (*models.Op
 	}
 
 	return result, nil
+}
+
+func (ga *GeneticOptimizer) OptimizeMulti(upstreamWL, downstreamWL float64, name string) (*models.OptimizationResult, []ParetoSolution, error) {
+	req := models.OptimizationRequest{
+		UpstreamWaterLevel:   upstreamWL,
+		DownstreamWaterLevel: downstreamWL,
+		PopulationSize:       ga.PopulationSize,
+		MaxGenerations:       ga.MaxGenerations,
+		MutationRate:         ga.MutationRate,
+		CrossoverRate:        ga.CrossoverRate,
+		OptimizationName:     name,
+		MinBlanketLength:     ga.MinBlanketLength,
+		MaxBlanketLength:     ga.MaxBlanketLength,
+		MinBlanketThickness:  ga.MinBlanketThickness,
+		MaxBlanketThickness:  ga.MaxBlanketThickness,
+	}
+	result, err := ga.Optimize(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	front := make([]ParetoSolution, len(ga.ParetoFront))
+	copy(front, ga.ParetoFront)
+	return result, front, nil
 }
 
 func (ga *GeneticOptimizer) ValidateOptimization(opt *models.OptimizationResult) error {

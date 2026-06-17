@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"tashan-weir-seepage/internal/models"
 )
 
@@ -15,6 +17,17 @@ type DataStore struct {
 
 func NewDataStore(db *Database) *DataStore {
 	return &DataStore{db: db}
+}
+
+func (ds *DataStore) Pool() *pgxpool.Pool {
+	return ds.db.Pool()
+}
+
+func (ds *DataStore) AcknowledgeAlarm(ctx context.Context, alarmID int64, handledBy, handleNote string) error {
+	query := `UPDATE alarm_records SET is_handled = TRUE, handled_by = $1, 
+		handled_time = NOW(), handle_note = $2 WHERE id = $3`
+	_, err := ds.db.Pool().Exec(ctx, query, handledBy, handleNote, alarmID)
+	return err
 }
 
 func (ds *DataStore) InsertSensorData(ctx context.Context, data *models.SensorData) error {

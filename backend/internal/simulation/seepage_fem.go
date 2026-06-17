@@ -10,12 +10,12 @@ import (
 )
 
 type DamGeometry struct {
-	Length              float64
-	Height              float64
-	TopWidth            float64
-	UpstreamSlope       float64
-	DownstreamSlope     float64
-	FoundationDepth     float64
+	Length          float64 `json:"length"`
+	Height          float64 `json:"height"`
+	TopWidth        float64 `json:"top_width"`
+	UpstreamSlope   float64 `json:"upstream_slope"`
+	DownstreamSlope float64 `json:"downstream_slope"`
+	FoundationDepth float64 `json:"foundation_depth"`
 }
 
 type BlanketConfig struct {
@@ -60,8 +60,49 @@ func NewSeepageSolver(geo DamGeometry, k float64) *SeepageSolver {
 		GridNX:        60,
 		GridNY:        30,
 		Interface: InterfaceElement{
-			Thickness:            geo.FoundationDepth / float64(30) * 2,
+			Thickness:         geo.FoundationDepth / float64(30) * 2,
 			ContactPermeability: k * 0.5,
+		},
+	}
+}
+
+func NewSeepageSolverWithConfig(
+	geo DamGeometry,
+	k float64,
+	nx, ny int,
+	foundationRatio float64,
+	interfaceEnabled bool,
+	interfaceThicknessRatio float64,
+	interfacePermeabilityRatio float64,
+) *SeepageSolver {
+	if nx <= 0 {
+		nx = 60
+	}
+	if ny <= 0 {
+		ny = 30
+	}
+	if foundationRatio <= 0 {
+		foundationRatio = 5.0
+	}
+	interfaceThickness := geo.FoundationDepth / float64(ny) * interfaceThicknessRatio
+	if interfaceThickness <= 0 {
+		interfaceThickness = geo.FoundationDepth / float64(ny) * 2
+	}
+	interfacePerm := k * interfacePermeabilityRatio
+	if !interfaceEnabled {
+		interfacePerm = k
+		interfaceThickness = 0
+	}
+
+	return &SeepageSolver{
+		Geometry:      geo,
+		PermeabilityK: k,
+		FoundationK:   k * foundationRatio,
+		GridNX:        nx,
+		GridNY:        ny,
+		Interface: InterfaceElement{
+			Thickness:         interfaceThickness,
+			ContactPermeability: interfacePerm,
 		},
 	}
 }
@@ -69,6 +110,25 @@ func NewSeepageSolver(geo DamGeometry, k float64) *SeepageSolver {
 func (s *SeepageSolver) SetGridResolution(nx, ny int) {
 	s.GridNX = nx
 	s.GridNY = ny
+}
+
+func (s *SeepageSolver) GetConfig() *SeepageSolver {
+	return s
+}
+
+func (s *SeepageSolver) GetGridNX() int {
+	return s.GridNX
+}
+
+func (s *SeepageSolver) GetGridNY() int {
+	return s.GridNY
+}
+
+func (s *SeepageSolver) GetMaterialZone(j, i int) int {
+	if j < 0 || j >= s.GridNY || i < 0 || i >= s.GridNX {
+		return 0
+	}
+	return s.MaterialZone[j][i]
 }
 
 func (s *SeepageSolver) SetWaterLevels(upH, downH float64) {
@@ -115,7 +175,6 @@ func (s *SeepageSolver) damProfile(yTop float64) (xStart, xEnd float64) {
 
 func (s *SeepageSolver) InitializeGrid() {
 	totalLength := s.Geometry.Length
-	totalHeight := s.Geometry.Height + s.Geometry.FoundationDepth
 
 	s.XCoords = utils.Linspace(0, totalLength, s.GridNX)
 	s.YCoords = utils.Linspace(-s.Geometry.FoundationDepth, s.Geometry.Height, s.GridNY)
@@ -202,9 +261,6 @@ func (s *SeepageSolver) SetBoundaryConditions() {
 }
 
 func (s *SeepageSolver) SolveSteady(maxIter int, tol float64) (int, error) {
-	dx := (s.Geometry.Length) / float64(s.GridNX-1)
-	dy := (s.Geometry.Height + s.Geometry.FoundationDepth) / float64(s.GridNY-1)
-
 	var iter int
 	for iter = 0; iter < maxIter; iter++ {
 		maxDelta := 0.0
@@ -326,8 +382,8 @@ func (s *SeepageSolver) SolveSteady(maxIter int, tol float64) (int, error) {
 }
 
 func (s *SeepageSolver) getPermeability(i1, j1, i2, j2 int) float64 {
-	perm1 := s.getPointPermeability(i1, j1)
-	perm2 := s.getPointPermeability(i2, j2)
+	perm1 := s.GetPointPermeability(i1, j1)
+	perm2 := s.GetPointPermeability(i2, j2)
 
 	if s.IsInterface[j1][i1] || s.IsInterface[j2][i2] {
 		return s.interfacePermeability(i1, j1, i2, j2, perm1, perm2)
@@ -362,7 +418,7 @@ func (s *SeepageSolver) interfacePermeability(i1, j1, i2, j2 int, perm1, perm2 f
 	return eqPerm
 }
 
-func (s *SeepageSolver) getPointPermeability(i, j int) float64 {
+func (s *SeepageSolver) GetPointPermeability(i, j int) float64 {
 	if s.IsInterface[j][i] {
 		return s.Interface.ContactPermeability
 	}
@@ -405,7 +461,7 @@ func (s *SeepageSolver) CalculateVelocities() {
 				continue
 			}
 
-			k := s.getPointPermeability(i, j)
+			k := s.GetPointPermeability(i, j)
 
 			dhdx := 0.0
 			if s.IsInDomain[j][i+1] && s.IsInDomain[j][i-1] {
@@ -519,7 +575,11 @@ func (s *SeepageSolver) RunSimulation(req models.SimulationRequest) (*models.See
 		s.PermeabilityK = req.PermeabilityK
 	}
 	if req.BlanketLength != nil && req.BlanketThickness != nil {
-		s.SetBlanket(*req.BlanketLength, *req.BlanketThickness, s.PermeabilityK*0.01)
+		blanketPerm := s.PermeabilityK * 0.01
+		if req.BlanketPermeability != nil {
+			blanketPerm = *req.BlanketPermeability
+		}
+		s.SetBlanket(*req.BlanketLength, *req.BlanketThickness, blanketPerm)
 	}
 
 	s.InitializeGrid()
@@ -592,4 +652,13 @@ func (s *SeepageSolver) RunSimulation(req models.SimulationRequest) (*models.See
 	}
 
 	return simResult, grids, nil
+}
+
+func (s *SeepageSolver) Run(upstreamWL, downstreamWL float64, name string) (*models.SeepageSimulation, []models.SimulationGrid, error) {
+	req := models.SimulationRequest{
+		UpstreamWaterLevel:  upstreamWL,
+		DownstreamWaterLevel: downstreamWL,
+		SimulationName:      name,
+	}
+	return s.RunSimulation(req)
 }

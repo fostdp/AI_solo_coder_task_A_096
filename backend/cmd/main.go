@@ -11,7 +11,6 @@ import (
 
 	"tashan-weir-seepage/internal/api"
 	"tashan-weir-seepage/internal/database"
-	"tashan-weir-seepage/internal/mqtt"
 )
 
 func main() {
@@ -33,35 +32,16 @@ func main() {
 
 	store := database.NewDataStore(db)
 
-	log.Println("[INIT] Initializing MQTT service...")
-	var mqttSvc *mqtt.MQTTService
-	mqttSvc, err = mqtt.NewMQTTService()
-	if err != nil {
-		log.Printf("[WARN] MQTT service initialization failed (running in fallback mode): %v", err)
-		log.Println("[INFO] Alarms will be logged but not pushed via MQTT")
-		mqttSvc = nil
-	} else {
-		defer mqttSvc.Close()
-		log.Println("[OK] MQTT service connected")
-
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		mqttSvc.PublishStatus(ctx, map[string]interface{}{
-			"status":  "started",
-			"version": "1.0.0",
-			"service": "tashan-weir-seepage-backend",
-		})
-	}
-
-	log.Println("[INIT] Setting up HTTP API server...")
-	server := api.NewServer(store, mqttSvc)
-	log.Println("[OK] API routes configured")
+	log.Println("[INIT] Initializing modular services (dtu_receiver + alarm_mqtt + seepage_simulator + anti_seepage_optimizer)...")
+	server := api.NewServer(store)
+	defer server.Stop()
+	log.Println("[OK] Modular services started")
 
 	srv := &http.Server{
 		Addr:         ":" + port,
 		Handler:      server.Router(),
 		ReadTimeout:  60 * time.Second,
-		WriteTimeout: 120 * time.Second,
+		WriteTimeout: 600 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 
@@ -69,7 +49,8 @@ func main() {
 		log.Println()
 		log.Printf("[SERVER] API Server listening on :%s", port)
 		log.Printf("[SERVER] Frontend available at http://localhost:%s/", port)
-		log.Printf("[SERVER] API docs available at http://localhost:%s/api/v1/health", port)
+		log.Printf("[SERVER] API health at http://localhost:%s/api/v1/health", port)
+		log.Printf("[SERVER] API configs at http://localhost:%s/api/v1/configs", port)
 		log.Println()
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -83,22 +64,12 @@ func main() {
 	log.Println()
 	log.Printf("[SHUTDOWN] Received signal: %v", sig)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
-	if mqttSvc != nil {
-		mqttCtx, mqttCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer mqttCancel()
-		mqttSvc.PublishStatus(mqttCtx, map[string]interface{}{
-			"status":  "stopped",
-			"version": "1.0.0",
-			"service": "tashan-weir-seepage-backend",
-		})
-	}
 
 	log.Println("[SHUTDOWN] Stopping HTTP server...")
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("[ERROR] Server shutdown failed: %v", err)
+		log.Printf("[WARN] HTTP server shutdown error: %v", err)
 	}
 
 	log.Println("[SHUTDOWN] Server exited gracefully")

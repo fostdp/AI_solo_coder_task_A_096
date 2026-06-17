@@ -124,15 +124,16 @@ type OptimizationResult struct {
 }
 
 type SimulationRequest struct {
-	UpstreamWaterLevel  float64                `json:"upstream_water_level"`
-	DownstreamWaterLevel float64               `json:"downstream_water_level"`
-	GridResolutionX     int                    `json:"grid_resolution_x"`
-	GridResolutionY     int                    `json:"grid_resolution_y"`
-	PermeabilityK       float64                `json:"permeability_k"`
-	BlanketLength       *float64               `json:"blanket_length,omitempty"`
-	BlanketThickness    *float64               `json:"blanket_thickness,omitempty"`
-	SimulationName      string                 `json:"simulation_name"`
-	Parameters          map[string]interface{} `json:"parameters"`
+	UpstreamWaterLevel   float64                `json:"upstream_water_level"`
+	DownstreamWaterLevel float64                `json:"downstream_water_level"`
+	GridResolutionX      int                    `json:"grid_resolution_x"`
+	GridResolutionY      int                    `json:"grid_resolution_y"`
+	PermeabilityK        float64                `json:"permeability_k"`
+	BlanketLength        *float64               `json:"blanket_length,omitempty"`
+	BlanketThickness     *float64               `json:"blanket_thickness,omitempty"`
+	BlanketPermeability  *float64               `json:"blanket_permeability,omitempty"`
+	SimulationName       string                 `json:"simulation_name"`
+	Parameters           map[string]interface{} `json:"parameters"`
 }
 
 type OptimizationRequest struct {
@@ -147,4 +148,13 @@ type OptimizationRequest struct {
 	MutationRate         float64 `json:"mutation_rate"`
 	CrossoverRate        float64 `json:"crossover_rate"`
 	OptimizationName     string  `json:"optimization_name"`
+}
+
+type ParetoSolution struct {
+	BlanketLength    float64 `json:"blanket_length"`
+	BlanketThickness float64 `json:"blanket_thickness"`
+	SeepageFlow      float64 `json:"seepage_flow"`
+	MaterialCost     float64 `json:"material_cost"`
+	FlowReduction    float64 `json:"flow_reduction"`
+	Rank             int     `json:"rank"`
 }
